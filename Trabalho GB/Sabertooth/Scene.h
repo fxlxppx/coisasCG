@@ -2,8 +2,10 @@
 #include <vector>
 #include <string>
 #include "Obj3D.h"
+#include "Light.h"
 
-class Scene {
-public:
+struct Scene
+{
     std::vector<Obj3D*> objects;
+    std::vector<Light> lights;  // <-- ADICIONAR AQUI
 };

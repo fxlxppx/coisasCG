@@ -2,6 +2,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image_aug.h"
 #include <GL/glew.h>
@@ -31,8 +32,17 @@ std::map<std::string, Material*> loadMTL(const std::string& path)
             current->name = name;
             materials[name] = current;
         }
+        else if (type == "Ka" && current) {
+            ss >> current->ka.r >> current->ka.g >> current->ka.b;
+        }
         else if (type == "Kd" && current) {
             ss >> current->kd.r >> current->kd.g >> current->kd.b;
+        }
+        else if (type == "Ks" && current) {
+            ss >> current->ks.r >> current->ks.g >> current->ks.b;
+        }
+        else if (type == "Ns" && current) {
+            ss >> current->shininess;
         }
         else if (type == "map_Kd" && current) {
             std::string texPath;
@@ -43,15 +53,23 @@ std::map<std::string, Material*> loadMTL(const std::string& path)
             if (data) {
                 glGenTextures(1, &current->textureID);
                 glBindTexture(GL_TEXTURE_2D, current->textureID);
-                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
-                    channels == 4 ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data);
+
+                glTexImage2D(GL_TEXTURE_2D, 0,
+                    (channels == 4 ? GL_RGBA : GL_RGB),
+                    w, h, 0,
+                    (channels == 4 ? GL_RGBA : GL_RGB),
+                    GL_UNSIGNED_BYTE, data);
+
                 glGenerateMipmap(GL_TEXTURE_2D);
+
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
                 stbi_image_free(data);
                 current->hasTexture = true;
+
                 std::cout << "Textura carregada: " << texPath << std::endl;
             }
             else {

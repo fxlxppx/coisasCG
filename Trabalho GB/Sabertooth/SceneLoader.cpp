@@ -1,8 +1,10 @@
 #include "SceneLoader.h"
 #include "OBJLoader.h"
+
 #include <fstream>
 #include <sstream>
 #include <iostream>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -26,6 +28,9 @@ Scene* loadScene(const std::string& path)
         std::string type;
         ss >> type;
 
+        // ---------------------------
+        //    OBJETO 3D
+        // ---------------------------
         if (type == "model")
         {
             std::string modelPath;
@@ -41,7 +46,6 @@ Scene* loadScene(const std::string& path)
                 continue;
             }
 
-            // Monta matriz de transformação
             glm::mat4 transform = glm::mat4(1.0f);
             transform = glm::translate(transform, glm::vec3(px, py, pz));
             transform = glm::rotate(transform, glm::radians(rx), glm::vec3(1, 0, 0));
@@ -53,8 +57,28 @@ Scene* loadScene(const std::string& path)
 
             scene->objects.push_back(obj);
         }
+
+        // ---------------------------
+        //           LUZ
+        // ---------------------------
+        else if (type == "light")
+        {
+            float px, py, pz;
+            float r, g, b;
+
+            ss >> px >> py >> pz >> r >> g >> b;
+
+            Light L;
+            L.position = glm::vec3(px, py, pz);
+            L.color = glm::vec3(r, g, b);
+
+            scene->lights.push_back(L);
+        }
     }
 
-    std::cout << "Cena carregada com " << scene->objects.size() << " objetos.\n";
+    std::cout << "Cena carregada com "
+        << scene->objects.size() << " objetos e "
+        << scene->lights.size() << " luz(es).\n";
+
     return scene;
 }
