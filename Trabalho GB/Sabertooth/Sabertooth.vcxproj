@@ -126,6 +126,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Camera.cpp" />
+    <ClCompile Include="Editor2D.cpp" />
     <ClCompile Include="Face.cpp" />
     <ClCompile Include="Group.cpp" />
     <ClCompile Include="main.cpp" />
@@ -139,6 +140,7 @@
   <ItemGroup>
     <ClInclude Include="AssetManager.h" />
     <ClInclude Include="Camera.h" />
+    <ClInclude Include="Editor2D.h" />
     <ClInclude Include="Face.h" />
     <ClInclude Include="Group.h" />
     <ClInclude Include="Light.h" />
