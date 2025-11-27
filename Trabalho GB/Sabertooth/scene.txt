@@ -1,11 +1,13 @@
 # Modelo 1
 model model.obj     0 0 0    1 1 1     0 0 0
 
-# Modelo 2
-model model.obj     4 0 0    0.5 0.5 0.5    0 0 0
+# Luz principal (topo)
+light  0 20 0     30 30 30
 
-# Luz branca
-light  6  4  3    1 1 1
+# Luz lateral branca fraca
+light  8 5 8      0.5 0.5 0.5
 
-# Luz vermelha
-light -3  3  -1    1 0.2 0.2
+# Luz avermelhada decorativa
+light -5 4 -3     1 0.2 0.2
+
+track pista.obj 0 0 0   20   0 0 0

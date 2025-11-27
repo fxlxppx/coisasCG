@@ -28,9 +28,6 @@ Scene* loadScene(const std::string& path)
         std::string type;
         ss >> type;
 
-        // ---------------------------
-        //    OBJETO 3D
-        // ---------------------------
         if (type == "model")
         {
             std::string modelPath;
@@ -54,13 +51,50 @@ Scene* loadScene(const std::string& path)
             transform = glm::scale(transform, glm::vec3(sx, sy, sz));
 
             obj->transform = transform;
-
             scene->objects.push_back(obj);
         }
 
-        // ---------------------------
-        //           LUZ
-        // ---------------------------
+        else if (type == "obj")
+        {
+            std::string modelPath;
+            ss >> modelPath;
+
+            Obj3D* obj = loadOBJ(modelPath);
+            if (!obj) {
+                std::cerr << "Falha ao carregar OBJ: " << modelPath << std::endl;
+                continue;
+            }
+
+            obj->transform = glm::mat4(1.0f); 
+            scene->objects.push_back(obj);
+        }
+
+        else if (type == "track")
+        {
+            std::string modelPath;
+            float px, py, pz;
+            float scale;
+            float rx, ry, rz;
+
+            ss >> modelPath >> px >> py >> pz >> scale >> rx >> ry >> rz;
+
+            Obj3D* obj = loadOBJ(modelPath);
+            if (!obj) {
+                std::cerr << "Falha ao carregar track: " << modelPath << std::endl;
+                continue;
+            }
+
+            glm::mat4 transform = glm::mat4(1.0f);
+            transform = glm::translate(transform, glm::vec3(px, py, pz));
+            transform = glm::rotate(transform, glm::radians(rx), glm::vec3(1, 0, 0));
+            transform = glm::rotate(transform, glm::radians(ry), glm::vec3(0, 1, 0));
+            transform = glm::rotate(transform, glm::radians(rz), glm::vec3(0, 0, 1));
+            transform = glm::scale(transform, glm::vec3(scale));
+
+            obj->transform = transform;
+            scene->objects.push_back(obj);
+        }
+
         else if (type == "light")
         {
             float px, py, pz;

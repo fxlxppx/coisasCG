@@ -17,10 +17,6 @@
 #include "Camera.h"
 #include "Editor2D.h"
 
-// ===============================
-// GLOBAIS / ESTADO
-// ===============================
-
 enum AppMode {
     MODE_EDITOR_2D = 0,
     MODE_3D = 1
@@ -44,10 +40,6 @@ GLuint shader = 0;
 
 Editor2D editor;
 
-// ===============================
-// Funções auxiliares
-// ===============================
-
 void setMouseCaptured(GLFWwindow* window, bool state)
 {
     mouseCaptured = state;
@@ -70,18 +62,30 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 
 void processInput(GLFWwindow* window)
 {
-    // ---------- MODO EDITOR 2D ----------
     if (mode == MODE_EDITOR_2D)
     {
-        // ENTER: finalizar edição e mudar para modo 3D
         static bool enterPressed = false;
         if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
             if (!enterPressed) {
                 std::cout << "Mudando para modo 3D...\n";
+
+                if (editor.closed) {
+                    std::cout << "[Main] Exportando pista.obj...\n";
+                    if (!editor.exportOBJ("pista.obj"))
+                        std::cout << "[Main] exportOBJ retornou false.\n";
+                }
+                else {
+                    std::cout << "[Main] Atenção: curva não está fechada, exportOBJ ignorado.\n";
+                }
+
                 mode = MODE_3D;
                 setMouseCaptured(window, true);
-                // fundo padrão do 3D
                 glClearColor(0.3f, 0.6f, 0.9f, 1.0f);
+
+                camera.position = glm::vec3(6.0f, 4.0f, 8.0f);
+                camera.yaw = -135.0f;
+                camera.pitch = -20.0f;
+                camera.updateCameraVectors();
 
                 if (!scene) {
                     scene = loadScene("scene.txt");
@@ -97,11 +101,9 @@ void processInput(GLFWwindow* window)
         }
         else enterPressed = false;
 
-        // no editor 2D não fazer outras ações do 3D
         return;
     }
 
-    // ---------- MODO 3D ----------
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         camera.processKeyboard(GLFW_KEY_W, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -111,7 +113,14 @@ void processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera.processKeyboard(GLFW_KEY_D, deltaTime);
 
-    // ESC alterna captura do mouse
+    float vSpeed = 10.0f;
+
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
+        camera.position.y += vSpeed * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
+        camera.position.y -= vSpeed * deltaTime;
+
     static bool escPressed = false;
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
         if (!escPressed) {
@@ -121,7 +130,6 @@ void processInput(GLFWwindow* window)
     }
     else escPressed = false;
 
-    // Luz global (L)
     static bool Lpressed = false;
     if (glfwGetKey(window, GLFW_KEY_L) == GLFW_PRESS) {
         if (!Lpressed) {
@@ -131,7 +139,6 @@ void processInput(GLFWwindow* window)
     }
     else Lpressed = false;
 
-    // Luzes individuais (1..8)
     for (int i = 0; i < MAX_LIGHTS; i++) {
         int key = GLFW_KEY_1 + i;
         static bool numPressed[MAX_LIGHTS] = {};
@@ -167,7 +174,6 @@ GLuint loadShader(const char* vertPath, const char* fragPath)
     glShaderSource(v, 1, &vSrc, nullptr);
     glCompileShader(v);
 
-    // checar compilação (opcional)
     GLint success = 0;
     glGetShaderiv(v, GL_COMPILE_STATUS, &success);
     if (!success) {
@@ -200,10 +206,6 @@ GLuint loadShader(const char* vertPath, const char* fragPath)
     return program;
 }
 
-// ===============================
-// MAIN
-// ===============================
-
 int main()
 {
     if (!glfwInit()) {
@@ -221,7 +223,6 @@ int main()
     glfwMakeContextCurrent(window);
     glfwSetCursorPosCallback(window, mouse_callback);
 
-    // Editor inicia com mouse liberado (editor é a tela inicial)
     setMouseCaptured(window, false);
 
     glewExperimental = GL_TRUE;
@@ -233,14 +234,15 @@ int main()
     glEnable(GL_DEPTH_TEST);
 
     shader = loadShader("Shaders/Core/core.vert", "Shaders/Core/core.frag");
+    if (shader == 0) {
+        std::cerr << "Erro: shader invalido\n";
+        return -1;
+    }
 
-    // Editor 2D começa com fundo preto
     glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
 
-    // Projeção 3D (pré-criada)
     glm::mat4 proj = glm::perspective(glm::radians(60.0f), 800.0f / 600.0f, 0.1f, 100.0f);
 
-    // loop principal
     while (!glfwWindowShouldClose(window))
     {
         float time = (float)glfwGetTime();
@@ -249,7 +251,6 @@ int main()
 
         processInput(window);
 
-        // ------- MODO EDITOR 2D -------
         if (mode == MODE_EDITOR_2D)
         {
             glDisable(GL_DEPTH_TEST);
@@ -263,16 +264,20 @@ int main()
             continue;
         }
 
-        // ------- MODO 3D -------
         glEnable(GL_DEPTH_TEST);
         glUseProgram(shader);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glm::mat4 view = camera.getViewMatrix();
-
         glUniformMatrix4fv(glGetUniformLocation(shader, "proj"), 1, GL_FALSE, glm::value_ptr(proj));
         glUniformMatrix4fv(glGetUniformLocation(shader, "view"), 1, GL_FALSE, glm::value_ptr(view));
         glUniform3fv(glGetUniformLocation(shader, "cameraPos"), 1, glm::value_ptr(camera.position));
+
+        if (!scene) {
+            glfwSwapBuffers(window);
+            glfwPollEvents();
+            continue;
+        }
 
         int count = std::min((int)scene->lights.size(), MAX_LIGHTS);
         glUniform1i(glGetUniformLocation(shader, "lightCount"), count);
@@ -280,44 +285,58 @@ int main()
 
         for (int i = 0; i < count; i++) {
             std::string base = "lights[" + std::to_string(i) + "]";
-            glUniform3fv(glGetUniformLocation(shader, (base + ".position").c_str()),
-                1, glm::value_ptr(scene->lights[i].position));
-            glUniform3fv(glGetUniformLocation(shader, (base + ".color").c_str()),
-                1, glm::value_ptr(scene->lights[i].color));
-            glUniform1i(glGetUniformLocation(shader, ("lightEnabled[" + std::to_string(i) + "]").c_str()),
-                lightEnabled[i] ? 1 : 0);
+            glUniform3fv(glGetUniformLocation(shader, (base + ".position").c_str()), 1, glm::value_ptr(scene->lights[i].position));
+            glUniform3fv(glGetUniformLocation(shader, (base + ".color").c_str()), 1, glm::value_ptr(scene->lights[i].color));
+            glUniform1i(glGetUniformLocation(shader, ("lightEnabled[" + std::to_string(i) + "]").c_str()), lightEnabled[i] ? 1 : 0);
         }
 
-        // desenhar objetos
+
         for (Obj3D* obj : scene->objects)
         {
-            obj->transform = glm::rotate(obj->transform, deltaTime * 0.6f, glm::vec3(0, 1, 0));
+            if (!obj || !obj->mesh || obj->mesh->groups.empty())
+                continue;
 
-            glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, glm::value_ptr(obj->transform));
 
-            Material* mat = obj->mesh->groups[0]->material;
+            glUniformMatrix4fv(
+                glGetUniformLocation(shader, "model"),
+                1,
+                GL_FALSE,
+                glm::value_ptr(obj->transform)
+            );
 
-            glUniform3fv(glGetUniformLocation(shader, "material.ka"), 1, glm::value_ptr(mat->ka));
-            glUniform3fv(glGetUniformLocation(shader, "material.kd"), 1, glm::value_ptr(mat->kd));
-            glUniform3fv(glGetUniformLocation(shader, "material.ks"), 1, glm::value_ptr(mat->ks));
-            glUniform1f(glGetUniformLocation(shader, "material.shininess"), mat->shininess);
-            glUniform1i(glGetUniformLocation(shader, "material.hasTexture"), mat->hasTexture);
+            Material defaultMat;
+            defaultMat.ka = glm::vec3(0.2f);
+            defaultMat.kd = glm::vec3(0.7f);
+            defaultMat.ks = glm::vec3(0.1f);
+            defaultMat.shininess = 16.0f;
+            defaultMat.hasTexture = false;
 
-            if (mat->hasTexture)
+            for (Group* g : obj->mesh->groups)
             {
-                glActiveTexture(GL_TEXTURE0);
-                glBindTexture(GL_TEXTURE_2D, mat->textureID);
-                glUniform1i(glGetUniformLocation(shader, "texSampler"), 0);
-            }
+                Material* mat = g->material ? g->material : &defaultMat;
 
-            drawObject(obj, shader);
+                glUniform3fv(glGetUniformLocation(shader, "material.ka"), 1, glm::value_ptr(mat->ka));
+                glUniform3fv(glGetUniformLocation(shader, "material.kd"), 1, glm::value_ptr(mat->kd));
+                glUniform3fv(glGetUniformLocation(shader, "material.ks"), 1, glm::value_ptr(mat->ks));
+                glUniform1f(glGetUniformLocation(shader, "material.shininess"), mat->shininess);
+                glUniform1i(glGetUniformLocation(shader, "material.hasTexture"), mat->hasTexture);
+
+                if (mat->hasTexture)
+                {
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, mat->textureID);
+                    glUniform1i(glGetUniformLocation(shader, "texSampler"), 0);
+                }
+
+                glBindVertexArray(g->VAO);
+                glDrawArrays(GL_TRIANGLES, 0, g->numVertices);
+            }
         }
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    // clean exit
     glfwTerminate();
     return 0;
 }

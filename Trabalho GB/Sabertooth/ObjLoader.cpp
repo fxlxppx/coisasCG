@@ -4,6 +4,41 @@
 #include <sstream>
 #include <iostream>
 #include "Material.h"
+#include <vector>
+#include <algorithm> 
+
+static void parseFaceToken(const std::string& token, int& v, int& vt, int& vn)
+{
+    v = vt = vn = -1;
+
+    int slashCount = std::count(token.begin(), token.end(), '/');
+
+    if (slashCount == 0)
+    {
+        int r = sscanf(token.c_str(), "%d", &v);
+    }
+    else if (slashCount == 1)
+    {
+        int r = sscanf(token.c_str(), "%d/%d", &v, &vt);
+    }
+    else
+    {
+        if (token.find("//") != std::string::npos)
+        {
+            int r = sscanf(token.c_str(), "%d//%d", &v, &vn);
+        }
+        else
+        {
+            int r = sscanf(token.c_str(), "%d/%d/%d", &v, &vt, &vn);
+        }
+    }
+
+    
+    if (v > 0) v--; else v = 0;
+    if (vt > 0) vt--; else vt = -1;
+    if (vn > 0) vn--; else vn = -1;
+}
+
 
 Obj3D* loadOBJ(const std::string& path)
 {
@@ -18,135 +53,64 @@ Obj3D* loadOBJ(const std::string& path)
     currentGroup->name = "default";
     mesh->groups.push_back(currentGroup);
 
-    std::string line;
-    std::string mtlPath;
-
     std::vector<glm::vec3> tmpV;
-    std::vector<glm::vec2> tmpVT;
-    std::vector<glm::vec3> tmpVN;
 
+    std::string line;
     while (std::getline(file, line))
     {
         std::stringstream ss(line);
         std::string type;
         ss >> type;
 
-        if (type == "mtllib") {
-            ss >> mtlPath;
-        }
-        else if (type == "usemtl") {
-            std::string matName;
-            ss >> matName;
-            Material* m = new Material();
-            m->name = matName;
-            currentGroup->material = m;
-        }
-        else if (type == "g") {
-            std::string groupName;
-            ss >> groupName;
-
-            currentGroup = new Group();
-            currentGroup->name = groupName;
-            mesh->groups.push_back(currentGroup);
-        }
-        else if (type == "v") {
+        if (type == "v")
+        {
             glm::vec3 v;
             ss >> v.x >> v.y >> v.z;
             tmpV.push_back(v);
         }
-        else if (type == "vt") {
-            glm::vec2 vt;
-            ss >> vt.x >> vt.y;
-            tmpVT.push_back(vt);
-        }
-        else if (type == "vn") {
-            glm::vec3 vn;
-            ss >> vn.x >> vn.y >> vn.z;
-            tmpVN.push_back(vn);
-        }
-        else if (type == "f") {
+        else if (type == "f")
+        {
             std::vector<std::string> tokens;
-            std::string tok;
-            while (ss >> tok) tokens.push_back(tok);
+            std::string t;
 
-            // Triângulo
-            if (tokens.size() == 3) {
+            while (ss >> t)
+                tokens.push_back(t);
+
+            if (tokens.size() < 3) continue;
+
+            std::vector<int> verts;
+            verts.reserve(tokens.size());
+
+            for (auto& tok : tokens)
+            {
+                int v, vt, vn;
+                parseFaceToken(tok, v, vt, vn);
+                verts.push_back(v);
+            }
+
+            // Triangulação em fan
+            for (int i = 1; i + 1 < verts.size(); i++)
+            {
                 Face* f = new Face();
-                for (int i = 0; i < 3; i++) {
-                    std::string t = tokens[i];
-                    int v = -1, vt = -1, vn = -1;
-
-                    // Tenta todos os formatos
-                    if (sscanf(t.c_str(), "%d/%d/%d", &v, &vt, &vn) == 3) {}
-                    else if (sscanf(t.c_str(), "%d//%d", &v, &vn) == 2) {}
-                    else if (sscanf(t.c_str(), "%d/%d", &v, &vt) == 2) {}
-                    else sscanf(t.c_str(), "%d", &v);
-
-                    f->v.push_back(v - 1);
-                }
+                f->v = { verts[0], verts[i], verts[i + 1] };
                 currentGroup->faces.push_back(f);
-            }
-            // Quadrilátero (divide em dois triângulos)
-            else if (tokens.size() == 4) {
-                int idx[4];
-                for (int i = 0; i < 4; i++) {
-                    std::string t = tokens[i];
-                    int v = -1, vt = -1, vn = -1;
-
-                    if (sscanf(t.c_str(), "%d/%d/%d", &v, &vt, &vn) == 3) {}
-                    else if (sscanf(t.c_str(), "%d//%d", &v, &vn) == 2) {}
-                    else if (sscanf(t.c_str(), "%d/%d", &v, &vt) == 2) {}
-                    else sscanf(t.c_str(), "%d", &v);
-
-                    idx[i] = v - 1;
-                }
-
-                Face* f1 = new Face();
-                f1->v = { idx[0], idx[1], idx[2] };
-                currentGroup->faces.push_back(f1);
-
-                Face* f2 = new Face();
-                f2->v = { idx[0], idx[2], idx[3] };
-                currentGroup->faces.push_back(f2);
-            }
-            // Polígonos maiores (fan triangulation)
-            else if (tokens.size() > 4) {
-                int firstIndex = -1;
-                std::vector<int> polyIndices;
-
-                for (auto& t : tokens) {
-                    int v = -1, vt = -1, vn = -1;
-                    if (sscanf(t.c_str(), "%d/%d/%d", &v, &vt, &vn) == 3) {}
-                    else if (sscanf(t.c_str(), "%d//%d", &v, &vn) == 2) {}
-                    else if (sscanf(t.c_str(), "%d/%d", &v, &vt) == 2) {}
-                    else sscanf(t.c_str(), "%d", &v);
-
-                    polyIndices.push_back(v - 1);
-                }
-
-                firstIndex = polyIndices[0];
-                for (size_t i = 1; i + 1 < polyIndices.size(); i++) {
-                    Face* f = new Face();
-                    f->v = { firstIndex, polyIndices[i], polyIndices[i + 1] };
-                    currentGroup->faces.push_back(f);
-                }
             }
         }
     }
 
     mesh->vertices = tmpV;
 
-    // Debug
     size_t totalFaces = 0;
     for (auto g : mesh->groups) totalFaces += g->faces.size();
 
-    std::cout << "---- OBJ Carregado ----" << std::endl;
-    std::cout << "Verts: " << mesh->vertices.size() << std::endl;
-    std::cout << "Faces: " << totalFaces << std::endl;
+    std::cout << "---- OBJ Carregado ----\n";
+    std::cout << "Verts: " << mesh->vertices.size() << "\n";
+    std::cout << "Faces: " << totalFaces << "\n";
 
     Obj3D* obj = new Obj3D();
     obj->mesh = mesh;
 
     obj->mesh->uploadToGPU();
+
     return obj;
 }
