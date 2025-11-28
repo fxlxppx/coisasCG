@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cmath>
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -17,11 +18,7 @@
 #include "Camera.h"
 #include "Editor2D.h"
 
-enum AppMode {
-    MODE_EDITOR_2D = 0,
-    MODE_3D = 1
-};
-
+enum AppMode { MODE_EDITOR_2D = 0, MODE_3D = 1 };
 AppMode mode = MODE_EDITOR_2D;
 
 Camera camera(glm::vec3(5.0f, 3.0f, 7.0f));
@@ -39,6 +36,20 @@ Scene* scene = nullptr;
 GLuint shader = 0;
 
 Editor2D editor;
+
+float trackScale = 20.0f;
+float TRACK_HEIGHT = 0.05f;
+float carHeightOffset = 0.5f;
+float carSpeed = 3.0f;
+
+std::vector<glm::vec3> carPath;
+std::vector<float> carAccumLen;
+float carTotalLength = 0.0f;
+float carTravelS = 0.0f;
+
+Obj3D* carObj = nullptr;
+glm::vec3 carOriginalScale(1.0f);
+float carMinYLocal = 0.0f;
 
 void setMouseCaptured(GLFWwindow* window, bool state)
 {
@@ -60,41 +71,136 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
         camera.processMouseMovement((float)xpos, (float)ypos);
 }
 
+void buildCarPathFromEditor()
+{
+    carPath.clear();
+    carAccumLen.clear();
+    carTotalLength = 0.0f;
+    carTravelS = 0.0f;
+
+    if (editor.splineCenter.empty()) {
+        std::cout << "[Car] splineCenter vazia — nada a construir.\n";
+        return;
+    }
+
+    for (auto& p : editor.splineCenter) {
+        glm::vec3 v;
+        v.x = p.x * trackScale;
+        v.y = TRACK_HEIGHT + carHeightOffset;
+        v.z = -p.y * trackScale;
+        carPath.push_back(v);
+    }
+
+    if (carPath.size() >= 2) {
+        size_t n = carPath.size();
+        carAccumLen.resize(n);
+        carAccumLen[0] = 0.0f;
+
+        for (size_t i = 1; i < n; ++i) {
+            float d = glm::length(carPath[i] - carPath[i - 1]);
+            carAccumLen[i] = carAccumLen[i - 1] + d;
+        }
+
+        float closing = glm::length(carPath[0] - carPath.back());
+        carTotalLength = carAccumLen.back() + closing;
+    }
+    else {
+        carTotalLength = 0.0f;
+    }
+
+    std::cout << "[Car] Path construído: pontos=" << carPath.size()
+        << " comprimento total=" << carTotalLength << "\n";
+}
+
+void sampleCarPath(float s, glm::vec3& outPos, glm::vec3& outTangent)
+{
+    if (carPath.empty()) { outPos = glm::vec3(0); outTangent = glm::vec3(1, 0, 0); return; }
+    if (carTotalLength <= 1e-6f) { outPos = carPath[0]; outTangent = glm::vec3(1, 0, 0); return; }
+
+    while (s < 0.0f) s += carTotalLength;
+    while (s >= carTotalLength) s -= carTotalLength;
+
+    size_t n = carPath.size();
+
+    if (s <= 0.0f) {
+        outPos = carPath[0];
+        outTangent = glm::normalize(carPath[1] - carPath[0]);
+        return;
+    }
+
+    size_t idx = 0;
+    for (size_t i = 0; i + 1 < n; i++) {
+        if (s >= carAccumLen[i] && s < carAccumLen[i + 1]) { idx = i; break; }
+        if (i + 1 == n - 1 && s >= carAccumLen[n - 1]) { idx = n - 1; break; }
+    }
+
+    if (idx < n - 1) {
+        float segStart = carAccumLen[idx];
+        float segEnd = carAccumLen[idx + 1];
+        float segLen = segEnd - segStart;
+        float local = (s - segStart) / segLen;
+
+        outPos = glm::mix(carPath[idx], carPath[idx + 1], local);
+        outTangent = glm::normalize(carPath[idx + 1] - carPath[idx]);
+    }
+    else {
+        float segStart = carAccumLen[n - 1];
+        float segLen = carTotalLength - segStart;
+        float local = (s - segStart) / segLen;
+
+        outPos = glm::mix(carPath[n - 1], carPath[0], local);
+        outTangent = glm::normalize(carPath[0] - carPath[n - 1]);
+    }
+}
+
 void processInput(GLFWwindow* window)
 {
     if (mode == MODE_EDITOR_2D)
     {
         static bool enterPressed = false;
+
         if (glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS) {
             if (!enterPressed) {
+
                 std::cout << "Mudando para modo 3D...\n";
 
                 if (editor.closed) {
                     std::cout << "[Main] Exportando pista.obj...\n";
-                    if (!editor.exportOBJ("pista.obj"))
-                        std::cout << "[Main] exportOBJ retornou false.\n";
-                }
-                else {
-                    std::cout << "[Main] Atenção: curva não está fechada, exportOBJ ignorado.\n";
+                    editor.exportOBJ("pista.obj");
                 }
 
                 mode = MODE_3D;
                 setMouseCaptured(window, true);
                 glClearColor(0.3f, 0.6f, 0.9f, 1.0f);
 
-                camera.position = glm::vec3(6.0f, 4.0f, 8.0f);
+                camera.position = glm::vec3(6, 4, 8);
                 camera.yaw = -135.0f;
                 camera.pitch = -20.0f;
                 camera.updateCameraVectors();
 
                 if (!scene) {
                     scene = loadScene("scene.txt");
-                    if (!scene) {
-                        std::cerr << "Falha ao carregar cena\n";
-                        exit(1);
+                    if (!scene) exit(1);
+                }
+
+                if (!scene->objects.empty()) {
+                    carObj = scene->objects[0];
+
+                    glm::mat4 t = carObj->transform;
+                    carOriginalScale.x = glm::length(glm::vec3(t[0][0], t[1][0], t[2][0]));
+                    carOriginalScale.y = glm::length(glm::vec3(t[0][1], t[1][1], t[2][1]));
+                    carOriginalScale.z = glm::length(glm::vec3(t[0][2], t[1][2], t[2][2]));
+
+                    if (carObj->mesh && !carObj->mesh->vertices.empty()) {
+                        float minY = carObj->mesh->vertices[0].y;
+                        for (auto& v : carObj->mesh->vertices)
+                            if (v.y < minY) minY = v.y;
+
+                        carMinYLocal = minY;
                     }
                 }
 
+                buildCarPathFromEditor();
                 glUseProgram(shader);
             }
             enterPressed = true;
@@ -113,11 +219,9 @@ void processInput(GLFWwindow* window)
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
         camera.processKeyboard(GLFW_KEY_D, deltaTime);
 
-    float vSpeed = 10.0f;
-
+    float vSpeed = 5.0f;
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
         camera.position.y += vSpeed * deltaTime;
-
     if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
         camera.position.y -= vSpeed * deltaTime;
 
@@ -142,6 +246,7 @@ void processInput(GLFWwindow* window)
     for (int i = 0; i < MAX_LIGHTS; i++) {
         int key = GLFW_KEY_1 + i;
         static bool numPressed[MAX_LIGHTS] = {};
+
         if (glfwGetKey(window, key) == GLFW_PRESS) {
             if (!numPressed[i]) {
                 lightEnabled[i] = !lightEnabled[i];
@@ -154,12 +259,9 @@ void processInput(GLFWwindow* window)
 
 GLuint loadShader(const char* vertPath, const char* fragPath)
 {
-    auto loadSrc = [](const char* p) {
+    auto loadSrc = [&](const char* p) {
         std::ifstream f(p);
-        if (!f.is_open()) {
-            std::cerr << "ERRO: Não foi possível abrir shader: " << p << "\n";
-            return std::string();
-        }
+        if (!f.is_open()) return std::string();
         std::stringstream ss; ss << f.rdbuf();
         return ss.str();
         };
@@ -167,58 +269,43 @@ GLuint loadShader(const char* vertPath, const char* fragPath)
     std::string vCode = loadSrc(vertPath);
     std::string fCode = loadSrc(fragPath);
 
-    const char* vSrc = vCode.c_str();
-    const char* fSrc = fCode.c_str();
-
     GLuint v = glCreateShader(GL_VERTEX_SHADER);
+    const char* vSrc = vCode.c_str();
     glShaderSource(v, 1, &vSrc, nullptr);
     glCompileShader(v);
 
-    GLint success = 0;
-    glGetShaderiv(v, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[1024]; glGetShaderInfoLog(v, 1024, nullptr, log);
-        std::cerr << "Vertex shader compile error:\n" << log << std::endl;
-    }
+    GLint ok;
+    glGetShaderiv(v, GL_COMPILE_STATUS, &ok);
+    if (!ok) { char log[1024]; glGetShaderInfoLog(v, 1024, nullptr, log); std::cerr << log; }
 
     GLuint f = glCreateShader(GL_FRAGMENT_SHADER);
+    const char* fSrc = fCode.c_str();
     glShaderSource(f, 1, &fSrc, nullptr);
     glCompileShader(f);
-    glGetShaderiv(f, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[1024]; glGetShaderInfoLog(f, 1024, nullptr, log);
-        std::cerr << "Fragment shader compile error:\n" << log << std::endl;
-    }
 
-    GLuint program = glCreateProgram();
-    glAttachShader(program, v);
-    glAttachShader(program, f);
-    glLinkProgram(program);
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (!success) {
-        char log[1024]; glGetProgramInfoLog(program, 1024, nullptr, log);
-        std::cerr << "Shader link error:\n" << log << std::endl;
-    }
+    glGetShaderiv(f, GL_COMPILE_STATUS, &ok);
+    if (!ok) { char log[1024]; glGetShaderInfoLog(f, 1024, nullptr, log); std::cerr << log; }
+
+    GLuint prog = glCreateProgram();
+    glAttachShader(prog, v);
+    glAttachShader(prog, f);
+    glLinkProgram(prog);
+
+    glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+    if (!ok) { char log[1024]; glGetProgramInfoLog(prog, 1024, nullptr, log); std::cerr << log; }
 
     glDeleteShader(v);
     glDeleteShader(f);
 
-    return program;
+    return prog;
 }
 
 int main()
 {
-    if (!glfwInit()) {
-        std::cerr << "Erro ao iniciar GLFW\n";
-        return -1;
-    }
+    if (!glfwInit()) return -1;
 
     GLFWwindow* window = glfwCreateWindow(800, 600, "Trabalho Grau B", nullptr, nullptr);
-    if (!window) {
-        std::cerr << "Erro ao criar janela\n";
-        glfwTerminate();
-        return -1;
-    }
+    if (!window) return -1;
 
     glfwMakeContextCurrent(window);
     glfwSetCursorPosCallback(window, mouse_callback);
@@ -226,20 +313,12 @@ int main()
     setMouseCaptured(window, false);
 
     glewExperimental = GL_TRUE;
-    if (glewInit() != GLEW_OK) {
-        std::cerr << "Erro ao iniciar GLEW\n";
-        return -1;
-    }
+    if (glewInit() != GLEW_OK) return -1;
 
     glEnable(GL_DEPTH_TEST);
 
     shader = loadShader("Shaders/Core/core.vert", "Shaders/Core/core.frag");
-    if (shader == 0) {
-        std::cerr << "Erro: shader invalido\n";
-        return -1;
-    }
-
-    glClearColor(0.05f, 0.05f, 0.05f, 1.0f);
+    if (shader == 0) return -1;
 
     glm::mat4 proj = glm::perspective(glm::radians(60.0f), 800.0f / 600.0f, 0.1f, 100.0f);
 
@@ -281,7 +360,7 @@ int main()
 
         int count = std::min((int)scene->lights.size(), MAX_LIGHTS);
         glUniform1i(glGetUniformLocation(shader, "lightCount"), count);
-        glUniform1i(glGetUniformLocation(shader, "globalLightEnabled"), globalLightEnabled ? 1 : 0);
+        glUniform1i(glGetUniformLocation(shader, "globalLightEnabled"), globalLightEnabled);
 
         for (int i = 0; i < count; i++) {
             std::string base = "lights[" + std::to_string(i) + "]";
@@ -290,19 +369,33 @@ int main()
             glUniform1i(glGetUniformLocation(shader, ("lightEnabled[" + std::to_string(i) + "]").c_str()), lightEnabled[i] ? 1 : 0);
         }
 
+        if (!carPath.empty() && carTotalLength > 0.001f && carObj != nullptr)
+        {
+            carTravelS += carSpeed * deltaTime;
+            while (carTravelS >= carTotalLength) carTravelS -= carTotalLength;
+
+            glm::vec3 pos, tan;
+            sampleCarPath(carTravelS, pos, tan);
+
+            glm::vec3 forward(-1, 0, 0);
+            float yaw = std::atan2(forward.z, forward.x) - std::atan2(tan.z, tan.x);
+
+            float lift = (TRACK_HEIGHT + carHeightOffset) - (carMinYLocal * carOriginalScale.y);
+
+            glm::mat4 model = glm::mat4(1);
+            model = glm::translate(model, glm::vec3(pos.x, pos.y + lift, pos.z));
+            model = glm::rotate(model, yaw, glm::vec3(0, 1, 0));
+            model = glm::scale(model, carOriginalScale);
+
+            carObj->transform = model;
+        }
 
         for (Obj3D* obj : scene->objects)
         {
             if (!obj || !obj->mesh || obj->mesh->groups.empty())
                 continue;
 
-
-            glUniformMatrix4fv(
-                glGetUniformLocation(shader, "model"),
-                1,
-                GL_FALSE,
-                glm::value_ptr(obj->transform)
-            );
+            glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, glm::value_ptr(obj->transform));
 
             Material defaultMat;
             defaultMat.ka = glm::vec3(0.2f);
