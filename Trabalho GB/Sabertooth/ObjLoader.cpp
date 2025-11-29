@@ -1,18 +1,18 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "OBJLoader.h"
+#include "MaterialLoader.h"
 #include <fstream>
 #include <sstream>
 #include <iostream>
 #include "Material.h"
 #include <vector>
-#include <algorithm> 
+#include <algorithm>
+#include <map>
 
 static void parseFaceToken(const std::string& token, int& v, int& vt, int& vn)
 {
     v = vt = vn = -1;
-
     int slashCount = std::count(token.begin(), token.end(), '/');
-
     if (slashCount == 0)
     {
         int r = sscanf(token.c_str(), "%d", &v);
@@ -32,13 +32,11 @@ static void parseFaceToken(const std::string& token, int& v, int& vt, int& vn)
             int r = sscanf(token.c_str(), "%d/%d/%d", &v, &vt, &vn);
         }
     }
-
     
     if (v > 0) v--; else v = 0;
     if (vt > 0) vt--; else vt = -1;
     if (vn > 0) vn--; else vn = -1;
 }
-
 
 Obj3D* loadOBJ(const std::string& path)
 {
@@ -54,6 +52,12 @@ Obj3D* loadOBJ(const std::string& path)
     mesh->groups.push_back(currentGroup);
 
     std::vector<glm::vec3> tmpV;
+    
+    std::map<std::string, Material*> materials;
+    Material* currentMaterial = nullptr;
+    
+    size_t lastSlash = path.find_last_of("/\\");
+    std::string dir = (lastSlash != std::string::npos) ? path.substr(0, lastSlash + 1) : "";
 
     std::string line;
     while (std::getline(file, line))
@@ -62,7 +66,41 @@ Obj3D* loadOBJ(const std::string& path)
         std::string type;
         ss >> type;
 
-        if (type == "v")
+        if (type == "mtllib")
+        {
+            std::string mtlFile;
+            ss >> mtlFile;
+            std::string mtlPath = dir + mtlFile;
+            
+            std::cout << "[OBJ] Carregando MTL: " << mtlPath << std::endl;
+            materials = loadMTL(mtlPath);
+            
+            if (materials.empty()) {
+                std::cerr << "[OBJ] AVISO: Nenhum material carregado de " << mtlPath << std::endl;
+            }
+        }
+        else if (type == "usemtl")
+        {
+            std::string matName;
+            ss >> matName;
+            
+            if (materials.find(matName) != materials.end())
+            {
+                currentMaterial = materials[matName];
+                
+                currentGroup = new Group();
+                currentGroup->name = matName;
+                currentGroup->material = currentMaterial;
+                mesh->groups.push_back(currentGroup);
+                
+                std::cout << "[OBJ] Usando material: " << matName << std::endl;
+            }
+            else
+            {
+                std::cerr << "[OBJ] AVISO: Material '" << matName << "' não encontrado!" << std::endl;
+            }
+        }
+        else if (type == "v")
         {
             glm::vec3 v;
             ss >> v.x >> v.y >> v.z;
@@ -72,7 +110,6 @@ Obj3D* loadOBJ(const std::string& path)
         {
             std::vector<std::string> tokens;
             std::string t;
-
             while (ss >> t)
                 tokens.push_back(t);
 
@@ -80,7 +117,6 @@ Obj3D* loadOBJ(const std::string& path)
 
             std::vector<int> verts;
             verts.reserve(tokens.size());
-
             for (auto& tok : tokens)
             {
                 int v, vt, vn;
@@ -89,7 +125,7 @@ Obj3D* loadOBJ(const std::string& path)
             }
 
             // Triangulação em fan
-            for (int i = 1; i + 1 < verts.size(); i++)
+            for (size_t i = 1; i + 1 < verts.size(); i++)
             {
                 Face* f = new Face();
                 f->v = { verts[0], verts[i], verts[i + 1] };
@@ -104,12 +140,14 @@ Obj3D* loadOBJ(const std::string& path)
     for (auto g : mesh->groups) totalFaces += g->faces.size();
 
     std::cout << "---- OBJ Carregado ----\n";
-    std::cout << "Verts: " << mesh->vertices.size() << "\n";
+    std::cout << "Arquivo: " << path << "\n";
+    std::cout << "Vértices: " << mesh->vertices.size() << "\n";
     std::cout << "Faces: " << totalFaces << "\n";
+    std::cout << "Grupos/Materiais: " << mesh->groups.size() << "\n";
+    std::cout << "-----------------------\n";
 
     Obj3D* obj = new Obj3D();
     obj->mesh = mesh;
-
     obj->mesh->uploadToGPU();
 
     return obj;
