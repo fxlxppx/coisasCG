@@ -377,7 +377,7 @@ int main()
             glm::vec3 pos, tan;
             sampleCarPath(carTravelS, pos, tan);
 
-            glm::vec3 forward(-1, 0, 0);
+            glm::vec3 forward(0, 0, 1);
             float yaw = std::atan2(forward.z, forward.x) - std::atan2(tan.z, tan.x);
 
             float lift = (TRACK_HEIGHT + carHeightOffset) - (carMinYLocal * carOriginalScale.y);
