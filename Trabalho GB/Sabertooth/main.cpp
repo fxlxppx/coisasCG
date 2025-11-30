@@ -78,30 +78,6 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 
 ProjectileManager projectileManager;
 
-glm::vec3 screenPosToWorldDir(GLFWwindow* window, double mouseX, double mouseY)
-{
-    int w, h;
-    glfwGetWindowSize(window, &w, &h);
-
-    float nx = (2.0f * (float)mouseX) / (float)w - 1.0f;
-    float ny = 1.0f - (2.0f * (float)mouseY) / (float)h;
-
-    glm::vec4 clip = glm::vec4(nx, ny, -1.0f, 1.0f);
-
-    glm::mat4 invProj = glm::inverse(proj);
-    glm::vec4 eye = invProj * clip;
-    eye.z = -1.0f;
-    eye.w = 0.0f;
-
-    glm::mat4 view = camera.getViewMatrix();
-    glm::mat4 invView = glm::inverse(view);
-
-    glm::vec4 worldDir4 = invView * eye;
-    glm::vec3 worldDir = glm::normalize(glm::vec3(worldDir4));
-
-    return worldDir;
-}
-
 void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 {
     if (mode != MODE_3D) return;
@@ -110,8 +86,6 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 
     double mx, my;
     glfwGetCursorPos(window, &mx, &my);
-
-    glm::vec3 dir = screenPosToWorldDir(window, mx, my);
 
     glm::vec3 startPos = camera.position;
     projectileManager.spawn(startPos, camera.front, (float)glfwGetTime());
