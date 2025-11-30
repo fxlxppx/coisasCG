@@ -17,6 +17,8 @@
 #include "Renderer.h"
 #include "Camera.h"
 #include "Editor2D.h"
+#include "ObjLoader.h"
+#include "Projectile.h"
 
 enum AppMode { MODE_EDITOR_2D = 0, MODE_3D = 1 };
 AppMode mode = MODE_EDITOR_2D;
@@ -48,8 +50,11 @@ float carTotalLength = 0.0f;
 float carTravelS = 0.0f;
 
 Obj3D* carObj = nullptr;
+Obj3D* projectileObj = nullptr;
 glm::vec3 carOriginalScale(1.0f);
 float carMinYLocal = 0.0f;
+
+glm::mat4 proj;
 
 void setMouseCaptured(GLFWwindow* window, bool state)
 {
@@ -69,6 +74,48 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
 {
     if (mode == MODE_3D && mouseCaptured)
         camera.processMouseMovement((float)xpos, (float)ypos);
+}
+
+ProjectileManager projectileManager;
+
+glm::vec3 screenPosToWorldDir(GLFWwindow* window, double mouseX, double mouseY)
+{
+    int w, h;
+    glfwGetWindowSize(window, &w, &h);
+
+    float nx = (2.0f * (float)mouseX) / (float)w - 1.0f;
+    float ny = 1.0f - (2.0f * (float)mouseY) / (float)h;
+
+    glm::vec4 clip = glm::vec4(nx, ny, -1.0f, 1.0f);
+
+    glm::mat4 invProj = glm::inverse(proj);
+    glm::vec4 eye = invProj * clip;
+    eye.z = -1.0f;
+    eye.w = 0.0f;
+
+    glm::mat4 view = camera.getViewMatrix();
+    glm::mat4 invView = glm::inverse(view);
+
+    glm::vec4 worldDir4 = invView * eye;
+    glm::vec3 worldDir = glm::normalize(glm::vec3(worldDir4));
+
+    return worldDir;
+}
+
+void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
+{
+    if (mode != MODE_3D) return;
+    if (button != GLFW_MOUSE_BUTTON_LEFT) return;
+    if (action != GLFW_PRESS) return;
+
+    double mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+
+    glm::vec3 dir = screenPosToWorldDir(window, mx, my);
+
+    glm::vec3 startPos = camera.position;
+    projectileManager.spawn(startPos, camera.front, (float)glfwGetTime());
+
 }
 
 void buildCarPathFromEditor()
@@ -185,6 +232,7 @@ void processInput(GLFWwindow* window)
 
                 if (!scene->objects.empty()) {
                     carObj = scene->objects[0];
+					projectileObj = loadOBJ("Cube.obj");
 
                     glm::mat4 t = carObj->transform;
                     carOriginalScale.x = glm::length(glm::vec3(t[0][0], t[1][0], t[2][0]));
@@ -310,6 +358,8 @@ int main()
     glfwMakeContextCurrent(window);
     glfwSetCursorPosCallback(window, mouse_callback);
 
+    glfwSetMouseButtonCallback(window, mouse_button_callback);
+
     setMouseCaptured(window, false);
 
     glewExperimental = GL_TRUE;
@@ -320,7 +370,7 @@ int main()
     shader = loadShader("Shaders/Core/core.vert", "Shaders/Core/core.frag");
     if (shader == 0) return -1;
 
-    glm::mat4 proj = glm::perspective(glm::radians(60.0f), 800.0f / 600.0f, 0.1f, 100.0f);
+    proj = glm::perspective(glm::radians(60.0f), 800.0f / 600.0f, 0.1f, 100.0f);
 
     while (!glfwWindowShouldClose(window))
     {
@@ -423,6 +473,42 @@ int main()
 
                 glBindVertexArray(g->VAO);
                 glDrawArrays(GL_TRIANGLES, 0, g->numVertices);
+            }
+        }
+
+		projectileManager.update(deltaTime, time);
+
+        if (projectileObj && projectileObj->mesh) {
+            for (Projectile& p : projectileManager.projectiles) {
+                glUniformMatrix4fv(glGetUniformLocation(shader, "model"), 1, GL_FALSE, glm::value_ptr(p.model));
+
+                Material defaultMat;
+                defaultMat.ka = glm::vec3(0.2f);
+                defaultMat.kd = glm::vec3(0.7f);
+                defaultMat.ks = glm::vec3(0.1f);
+                defaultMat.shininess = 16.0f;
+                defaultMat.hasTexture = false;
+
+                for (Group* g : projectileObj->mesh->groups)
+                {
+                    Material* mat = g->material ? g->material : &defaultMat;
+
+                    glUniform3fv(glGetUniformLocation(shader, "material.ka"), 1, glm::value_ptr(mat->ka));
+                    glUniform3fv(glGetUniformLocation(shader, "material.kd"), 1, glm::value_ptr(mat->kd));
+                    glUniform3fv(glGetUniformLocation(shader, "material.ks"), 1, glm::value_ptr(mat->ks));
+                    glUniform1f(glGetUniformLocation(shader, "material.shininess"), mat->shininess);
+                    glUniform1i(glGetUniformLocation(shader, "material.hasTexture"), mat->hasTexture);
+
+                    if (mat->hasTexture)
+                    {
+                        glActiveTexture(GL_TEXTURE0);
+                        glBindTexture(GL_TEXTURE_2D, mat->textureID);
+                        glUniform1i(glGetUniformLocation(shader, "texSampler"), 0);
+                    }
+
+                    glBindVertexArray(g->VAO);
+                    glDrawArrays(GL_TRIANGLES, 0, g->numVertices);
+                }
             }
         }
 

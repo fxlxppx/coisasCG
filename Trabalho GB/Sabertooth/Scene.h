@@ -7,5 +7,5 @@
 struct Scene
 {
     std::vector<Obj3D*> objects;
-    std::vector<Light> lights;  // <-- ADICIONAR AQUI
+    std::vector<Light> lights;
 };
